@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-rotation-app
+  namespace: vault-rotation-demo
+  labels:
+    app: vault-rotation-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-rotation-app
+  template:
+    metadata:
+      labels:
+        app: vault-rotation-app
+    spec:
+      containers:
+      - name: vault-rotation-app
+        image: vaultrotation:0.0.1-SNAPSHOT
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: VAULT_ADDR
+          value: "http://vault.default.svc.cluster.local:8200"
+        - name: VAULT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vault-token
+              key: token
+        - name: DATABASE_URL
+          value: "jdbc:mysql://mysql:3306/payments?useSSL=false&allowPublicKeyRetrieval=true"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+          requests:
+            cpu: "0.5"
+            memory: "256Mi"
+      volumes:
+      - name: config-volume
+        configMap:
+          name: vault-rotation-config 

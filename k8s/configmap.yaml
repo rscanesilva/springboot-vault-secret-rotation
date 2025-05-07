@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-rotation-config
+  namespace: vault-rotation-demo
+data:
+  application.properties: |
+    # Configurações do servidor
+    server.port=8080
+    
+    # Configurações de JPA
+    spring.jpa.hibernate.ddl-auto=update
+    spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect
+    spring.jpa.open-in-view=false
+    
+    # Configurações de log
+    logging.level.org.springframework.cloud.vault=DEBUG
+    logging.level.com.example.vaultrotation=DEBUG
+    
+    # Configuração para mostrar SQL
+    spring.jpa.show-sql=true
+    spring.jpa.properties.hibernate.format_sql=true
+
+  bootstrap.properties: |
+    # Nome da aplicação (usado pelo Vault para buscar segredos)
+    spring.application.name=vault-rotation
+    
+    # Configuração do Vault
+    spring.cloud.vault.uri=${VAULT_ADDR:http://vault.default.svc.cluster.local:8200}
+    spring.cloud.vault.token=${VAULT_TOKEN}
+    spring.cloud.vault.scheme=http
+    spring.cloud.vault.fail-fast=true
+    
+    # Configuração do ciclo de vida dos segredos
+    spring.cloud.vault.config.lifecycle.enabled=true
+    spring.cloud.vault.config.lifecycle.min-renewal=10s
+    spring.cloud.vault.config.lifecycle.expiry-threshold=1m
+    
+    # Configuração do banco de dados secretos
+    spring.cloud.vault.database.enabled=true
+    spring.cloud.vault.database.role=payments-app
+    spring.cloud.vault.database.backend=database
+    
+    # Importar configuração do Vault
+    spring.config.import=vault://
+    
+    # Desativar KV backend (opcional, pois estamos usando apenas o banco de dados)
+    spring.cloud.vault.kv.enabled=false
+    
+    # URL do banco de dados
+    spring.datasource.url=${DATABASE_URL}
+    
+    # Expor endpoint de refresh para atualizações manuais se necessário
+    management.endpoints.web.exposure.include=refresh,health,info 
