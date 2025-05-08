@@ -1,1 +1,0 @@
-SET SQL_SAFE_UPDATES = 0; DELETE FROM mysql.user WHERE user LIKE 'v-token%'; FLUSH PRIVILEGES;
