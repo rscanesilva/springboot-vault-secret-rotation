@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mysql-connection-test
+  namespace: vault-rotation-demo
+spec:
+  template:
+    spec:
+      containers:
+      - name: mysql-client
+        image: mysql:8
+        env:
+        - name: MYSQL_PWD
+          value: "rootpassword"
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Testando conexão com MySQL..."
+          mysql -u root -h host.minikube.internal -e "SHOW DATABASES;" || exit 1
+          echo "Conexão bem-sucedida!"
+      restartPolicy: Never
+  backoffLimit: 1 

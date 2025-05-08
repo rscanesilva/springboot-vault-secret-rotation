@@ -5,11 +5,11 @@ set -e
 
 echo "Iniciando o processo de implantação..."
 
-# Construir o projeto com Maven
+# Construir a aplicação Spring Boot
 echo "Construindo o projeto com Maven..."
 ./mvnw clean package -DskipTests
 
-# Construir a imagem Docker
+# Construir a imagem Docker usando o Dockerfile que criamos
 echo "Construindo a imagem Docker..."
 eval $(minikube docker-env)
 docker build -t vaultrotation:0.0.1-SNAPSHOT .
@@ -52,4 +52,7 @@ echo "Implantação concluída com sucesso!"
 echo "Para acessar a aplicação, execute: minikube service vault-rotation-app -n vault-rotation-demo"
 
 # Mostrar informações do pod
-kubectl get pods -n vault-rotation-demo 
+kubectl get pods -n vault-rotation-demo
+
+# Carregar a imagem no Minikube
+minikube image load vaultrotation:0.0.1-SNAPSHOT 
