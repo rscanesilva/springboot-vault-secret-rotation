@@ -37,6 +37,9 @@ public class DatabaseConfig implements DisposableBean {
     
     @Autowired(required = false)
     private ConnectionHealthMonitor healthMonitor;
+    
+    @Autowired
+    private MySqlUserManager mySqlUserManager;
 
     @Value("${spring.datasource.url:jdbc:mysql://host.minikube.internal:3306/payments?useSSL=false&allowPublicKeyRetrieval=true}")
     private String url;
@@ -90,6 +93,8 @@ public class DatabaseConfig implements DisposableBean {
             // Detectar se estamos usando credenciais dinâmicas do Vault
             if (username != null && username.startsWith("v-")) {
                 log.info("Utilizando credencial dinâmica do Vault. Usuário: {}", username);
+                // Registrar o usuário atual no gerenciador de usuários MySQL
+                mySqlUserManager.updateCurrentVaultUser(username);
             } else {
                 log.info("Utilizando credencial estática para o banco de dados");
             }

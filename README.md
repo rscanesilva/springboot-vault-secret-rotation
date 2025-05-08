@@ -2,13 +2,50 @@
 
 Este projeto demonstra como implementar a rotação dinâmica de credenciais de banco de dados usando HashiCorp Vault em uma aplicação Spring Boot. O processo de rotação de segredos permite que sua aplicação utilize credenciais temporárias para se conectar ao banco de dados MySQL, aumentando a segurança ao eliminar credenciais estáticas de longo prazo.
 
+## Funcionalidades Principais
+
+- **Rotação Dinâmica de Credenciais de Banco de Dados**: Utiliza o Vault para gerar credenciais temporárias para o MySQL
+- **Monitoramento de Saúde da Conexão**: Verifica periodicamente a saúde da conexão com o banco de dados e força a rotação em caso de problemas
+- **Atualização Automática de Configurações**: Atualiza propriedades da aplicação sem necessidade de reiniciar quando secrets KV são alteradas no Vault
+- **Resiliência a Falhas**: Implementa mecanismos para lidar com falhas de conexão e renovação automática de leases (arrendamentos)
+- **Limpeza de Conexões**: Gerencia corretamente a limpeza de conexões antigas durante a rotação de credenciais
+- **Monitoramento de Usuários Vault**: Rastreia usuários criados pelo Vault para facilitar o gerenciamento
+
 ## Pré-requisitos
 
 - Java 17+
 - Docker
 - Minikube ou outro cluster Kubernetes
-- MySQL 8 executando em um contêiner Docker
+- MySQL 8 executando em um contêiner Docker ou localmente
 - HashiCorp Vault executando no Minikube
+
+## Arquitetura da Solução
+
+### Componentes Principais
+
+1. **Spring Cloud Vault**: Integração com o Vault para obtenção e renovação de secrets
+2. **ConnectionHealthMonitor**: Monitora a saúde das conexões e força a rotação quando necessário
+3. **VaultRefresher**: Programado para solicitar novas credenciais periodicamente
+4. **DatabaseConfig**: Configura o DataSource com capacidade de atualização dinâmica
+5. **MySqlUserManager**: Rastreia os usuários criados pelo Vault
+
+### Fluxo de Rotação de Credenciais
+
+1. A aplicação inicia e solicita credenciais ao Vault usando o Spring Cloud Vault
+2. O Vault cria um usuário temporário no MySQL e retorna as credenciais
+3. A aplicação configura o DataSource com as credenciais recebidas
+4. O `VaultRefresher` programa a solicitação de novas credenciais antes da expiração
+5. Quando novas credenciais são recebidas, o DataSource é recriado com as novas credenciais
+6. As conexões antigas são fechadas graciosamente e novas conexões são estabelecidas
+
+### Atualizações Automáticas de Secrets KV
+
+As secrets armazenadas no KV (Key-Value) do Vault são acessadas pela aplicação através do Spring Cloud Vault. A atualização automática dessas secrets funciona da seguinte forma:
+
+1. As properties são definidas no caminho `kv/vault-rotation` no Vault
+2. A aplicação carrega estas propriedades durante a inicialização
+3. O context refresh é acionado periodicamente ou manualmente
+4. As alterações nas secrets são detectadas e aplicadas à aplicação sem reiniciar
 
 ## Configuração do Vault
 
@@ -27,7 +64,10 @@ helm install vault hashicorp/vault --set server.dev.enabled=true
 ```bash
 # Configurar variáveis de ambiente do Vault
 export VAULT_ADDR=http://localhost:8200
-export VAULT_TOKEN=seu-token-root  # Obtido ao instalar o Vault
+export VAULT_TOKEN=root  # No modo dev, o token é "root"
+
+# Acessar o shell do Vault
+kubectl exec -it vault-0 -- /bin/sh
 
 # Habilitar o mecanismo de segredos do banco de dados
 vault secrets enable database
@@ -35,17 +75,17 @@ vault secrets enable database
 # Configurar a conexão com o MySQL
 vault write database/config/mysql \
     plugin_name=mysql-database-plugin \
-    connection_url="{{username}}:{{password}}@tcp(mysql:3306)/" \
+    connection_url="{{username}}:{{password}}@tcp(host.minikube.internal:3306)/" \
     allowed_roles="payments-app" \
     username="root" \
-    password="senha-root-mysql"
+    password="rootpassword"
 
 # Criar a role para a aplicação
 vault write database/roles/payments-app \
     db_name=mysql \
     creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}'; GRANT ALL PRIVILEGES ON payments.* TO '{{name}}'@'%';" \
-    default_ttl="1m" \
-    max_ttl="2m"
+    default_ttl="5m" \
+    max_ttl="10m"
 ```
 
 ### 3. Configurar Secrets Estáticas (Key-Value)
@@ -56,139 +96,139 @@ A aplicação também suporta secrets estáticas que podem ser atualizadas sem r
 # Habilitar o mecanismo de segredos Key-Value versão 2
 vault secrets enable -version=2 kv
 
-# Adicionar configurações de API externa
+# Adicionar configurações para a aplicação
 vault kv put kv/vault-rotation api.external.url=https://api.exemplo.com/v1
 vault kv put kv/vault-rotation api.external.apiKey=chave-secreta-123
 vault kv put kv/vault-rotation api.external.timeout=10000
 ```
 
-### 4. Testar a geração de credenciais
+## Implantação no Kubernetes
+
+Você pode usar os arquivos de configuração fornecidos no repositório para implantar a aplicação:
 
 ```bash
-vault read database/creds/payments-app
+# Construir a aplicação
+mvn clean package -DskipTests
+
+# Construir a imagem Docker (usando o ambiente Docker do Minikube)
+eval $(minikube docker-env)
+docker build -t vault-rotation-app:snapshot .
+
+# Aplicar a configuração do Kubernetes
+kubectl apply -f k8s/deployment.yaml
+
+# Ou usar o Terraform
+cd terraform
+terraform init
+terraform apply -auto-approve
 ```
 
-## Configuração do MySQL
+## Configuração da Aplicação
 
-### 1. Criar o Banco de Dados
+### application.properties
 
-```bash
-# Conectar ao MySQL
-mysql -h localhost -P 3306 -u root -p
+A configuração principal inclui:
 
-# Criar o banco de dados
-CREATE DATABASE payments;
+```properties
+# Server
+server.port=8080
 
-# Criar a tabela de pagamentos
-USE payments;
-CREATE TABLE payments (
-    id VARCHAR(36) PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    cc_info VARCHAR(100) NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
-    created_at TIMESTAMP NOT NULL
-);
+# Database
+spring.datasource.url=jdbc:mysql://host.minikube.internal:3306/payments?useSSL=false&allowPublicKeyRetrieval=true
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+# JPA
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+
+# Vault
+spring.cloud.vault.enabled=true
+spring.cloud.vault.kv.enabled=true
+spring.cloud.vault.kv.backend=kv
+spring.cloud.vault.kv.default-context=vault-rotation
+spring.cloud.vault.database.enabled=true
+spring.cloud.vault.database.role=payments-app
+spring.cloud.vault.database.backend=database
+
+# Logging
+logging.level.com.example.vaultrotation=DEBUG
 ```
 
-## Construção e Implantação
+### bootstrap.properties
 
-### 1. Construir o Projeto
+```properties
+# Application
+spring.application.name=vault-rotation
 
-```bash
-./mvnw clean package
+# Vault
+spring.cloud.vault.uri=http://vault:8200
+spring.cloud.vault.token=root
+spring.cloud.vault.fail-fast=false
+spring.cloud.vault.kv.default-context=vault-rotation
+spring.cloud.vault.database.role=payments-app
+spring.cloud.vault.database.backend=database
 ```
 
-### 2. Construir a Imagem Docker
+## Monitoramento e Depuração
 
-```bash
-docker build -t vaultrotation:0.0.1-SNAPSHOT .
+### Logs Importantes
+
+Os seguintes padrões de log são úteis para monitorar a saúde da rotação de credenciais:
+
+- `Utilizando credencial dinâmica do Vault` - indica que novas credenciais foram obtidas
+- `Evento de lease recebido: AfterSecretLeaseRenewedEvent` - indica a renovação bem-sucedida do lease
+- `Fechando pool de conexões anterior` - indica o fechamento do pool antigo durante a rotação
+- `Conexão com o banco de dados estabelecida com sucesso` - indica uma conexão bem-sucedida
+
+### Monitorar Usuários do MySQL
+
+Para listar os usuários criados pelo Vault no MySQL:
+
+```sql
+SELECT user FROM mysql.user WHERE user LIKE 'v-%';
 ```
-
-### 3. Implantação no Minikube
-
-Você pode usar o script de implantação fornecido:
-
-```bash
-./deploy.sh
-```
-
-O script irá:
-1. Construir o projeto com Maven
-2. Construir a imagem Docker
-3. Criar o namespace no Kubernetes (se não existir)
-4. Solicitar o token do Vault
-5. Criar e aplicar os recursos do Kubernetes (Secret, ConfigMap, Service, Deployment)
-
-## Uso da Aplicação
-
-### 1. Acessar a Aplicação
-
-```bash
-minikube service vault-rotation-app -n vault-rotation-demo
-```
-
-### 2. Endpoints Disponíveis
-
-- `GET /api/payments` - Listar todos os pagamentos
-- `POST /api/payments` - Criar um novo pagamento
-- `GET /api/payments/{id}` - Obter um pagamento por ID
-- `DELETE /api/payments/{id}` - Excluir um pagamento
-
-### 3. Monitorar a Rotação de Credenciais
-
-- `GET /api/db-info` - Obter informações sobre a conexão do banco de dados atual
-- `POST /api/db-info/refresh` - Forçar uma atualização manual do contexto da aplicação
-
-### 4. Gerenciar Configurações de API Externa
-
-- `GET /api/config` - Obter configurações atuais da API externa
-- `POST /api/config/refresh` - Forçar uma atualização das configurações a partir do Vault
-
-## Como Atualizar Secrets Estáticas
-
-Você pode atualizar secrets no Vault e a aplicação detectará as mudanças sem necessidade de reiniciar:
-
-```bash
-# Atualizar a URL da API externa
-vault kv put kv/vault-rotation api.external.url=https://api-nova.exemplo.com/v2
-
-# Verificar a atualização
-curl -X POST http://localhost:8080/api/config/refresh
-```
-
-A aplicação verifica atualizações automáticas a cada 5 minutos, mas você pode forçar uma atualização imediata com o endpoint `/api/config/refresh`.
-
-## Como a Rotação de Segredos Funciona
-
-1. O Spring Cloud Vault obtém credenciais dinâmicas do Vault ao iniciar a aplicação
-2. Um listener monitora os eventos de lease (arrendamento) das credenciais
-3. Quando uma credencial está prestes a expirar, a aplicação solicita novas credenciais
-4. O bean DataSource é recriado com as novas credenciais
-5. As conexões existentes são fechadas e novas conexões são criadas com as novas credenciais
-6. Para configurações estáticas, um scheduler verifica periodicamente atualizações
 
 ## Considerações para Produção
 
-- Configure TTLs mais longos em produção (por exemplo, horas em vez de minutos)
-- Use autenticação mais segura para o Vault, como autenticação Kubernetes
-- Implemente monitoria e alertas para falhas na rotação de credenciais
-- Configure backoff e retries para eventos de falha na rotação
-- Considere usar o HCP Vault em vez de auto-gerenciar o Vault
+- **TTL mais longos**: Configure TTLs mais longos em produção (2-12h) para reduzir o número de rotações
+- **Segurança do Vault**: Use autenticação Kubernetes em vez de tokens estáticos
+- **Redução de Logs**: Ajuste o nível de log para evitar excesso de informações em produção
+- **Monitoramento**: Implemente alertas para falhas na rotação de credenciais
+- **Backoff/Retry**: Configure políticas de retry para eventos de falha na rotação
+- **Pool de Conexões**: Ajuste os parâmetros do HikariCP para otimizar o gerenciamento de conexões
 
 ## Troubleshooting
 
 ### Credenciais não estão sendo rotacionadas
 
-Verifique os logs da aplicação para mensagens relacionadas à rotação de credenciais:
+Verifique os logs da aplicação:
 
 ```bash
 kubectl logs -f -n vault-rotation-demo deployment/vault-rotation-app
 ```
 
-### Problemas de Conexão com o Vault
+### Problemas com usuários no MySQL
 
-Verifique se o Vault está acessível do namespace da aplicação:
+Verifique se há muitos usuários criados pelo Vault:
+
+```sql
+SELECT COUNT(*) FROM mysql.user WHERE user LIKE 'v-%';
+```
+
+### Mensagens "Vault location [kv/vault-rotation] not resolvable"
+
+Esta mensagem é esperada se você não tiver configurado secrets no caminho KV correspondente. Crie um secret vazio ou desative o backend KV se não estiver em uso.
+
+## Desenvolvimento Local
+
+Para desenvolvimento local, você pode iniciar o Vault e o MySQL usando Docker Compose:
 
 ```bash
-kubectl exec -it -n vault-rotation-demo deployment/vault-rotation-app -- curl -v http://vault.default.svc.cluster.local:8200/v1/sys/health
+docker-compose up -d
+```
+
+Em seguida, execute a aplicação localmente:
+
+```bash
+./mvnw spring-boot:run
 ``` 

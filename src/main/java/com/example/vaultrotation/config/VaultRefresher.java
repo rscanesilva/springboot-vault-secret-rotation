@@ -1,6 +1,7 @@
 package com.example.vaultrotation.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -9,6 +10,7 @@ import org.springframework.cloud.context.scope.refresh.RefreshScopeRefreshedEven
 import org.springframework.cloud.vault.config.VaultProperties;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,10 +32,14 @@ public class VaultRefresher implements ApplicationListener<RefreshScopeRefreshed
     private final SecretLeaseContainer leaseContainer;
     private final String databaseRole;
     private final String databaseBackend;
+    private final Environment environment;
+    private final MySqlUserManager mySqlUserManager;
 
     public VaultRefresher(
             ContextRefresher contextRefresher,
             SecretLeaseContainer leaseContainer,
+            Environment environment,
+            MySqlUserManager mySqlUserManager,
             @Value("${spring.cloud.vault.database.role:payments-app}") String databaseRole,
             @Value("${spring.cloud.vault.database.backend:database}") String databaseBackend) {
         
@@ -41,6 +47,8 @@ public class VaultRefresher implements ApplicationListener<RefreshScopeRefreshed
         this.leaseContainer = leaseContainer;
         this.databaseRole = databaseRole;
         this.databaseBackend = databaseBackend;
+        this.environment = environment;
+        this.mySqlUserManager = mySqlUserManager;
         
         String path = String.format("%s/creds/%s", databaseBackend, databaseRole);
         log.info("VaultRefresher inicializado para monitorar o caminho: {}", path);
@@ -83,14 +91,37 @@ public class VaultRefresher implements ApplicationListener<RefreshScopeRefreshed
             log.info("Atualizando contexto para utilizar novas credenciais do banco de dados");
             Set<String> refreshedKeys = contextRefresher.refresh();
             log.info("Contexto atualizado, {} propriedades atualizadas: {}", refreshedKeys.size(), refreshedKeys);
+            
+            // Após a atualização do contexto, obter o novo usuário e atualizar o gerenciador de usuários
+            updateUserManager();
         } catch (Exception e) {
             log.error("Erro ao atualizar contexto: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Atualiza o gerenciador de usuários MySQL com o usuário atual
+     */
+    private void updateUserManager() {
+        try {
+            String username = environment.getProperty("spring.datasource.username");
+            if (username != null && username.startsWith("v-")) {
+                log.info("Atualizando gerenciador de usuários MySQL com o novo usuário: {}", username);
+                mySqlUserManager.updateCurrentVaultUser(username);
+            } else {
+                log.warn("Nome de usuário atual não é um usuário Vault válido: {}", username);
+            }
+        } catch (Exception e) {
+            log.error("Erro ao atualizar gerenciador de usuários MySQL: {}", e.getMessage(), e);
         }
     }
 
     @Override
     public void onApplicationEvent(RefreshScopeRefreshedEvent event) {
         log.info("Contexto atualizado com sucesso: {}", event.getName());
+        
+        // Após o contexto ser atualizado, atualizar o gerenciador de usuários
+        updateUserManager();
     }
     
     /**

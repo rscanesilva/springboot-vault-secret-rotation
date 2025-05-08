@@ -3,56 +3,44 @@
 # Parar script se ocorrer algum erro
 set -e
 
-echo "Iniciando o processo de implantação..."
+# Cores para mensagens
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
-# Construir a aplicação Spring Boot
-echo "Construindo o projeto com Maven..."
-./mvnw clean package -DskipTests
-
-# Construir a imagem Docker usando o Dockerfile que criamos
-echo "Construindo a imagem Docker..."
-eval $(minikube docker-env)
-docker build -t vaultrotation:0.0.1-SNAPSHOT .
-
-# Verificar se o namespace existe, se não, criar
-if ! kubectl get namespace vault-rotation-demo > /dev/null 2>&1; then
-  echo "Criando namespace vault-rotation-demo..."
-  kubectl apply -f k8s/namespace.yaml
+# Verificar se o JAR já existe
+if [ ! -f "target/vault-rotation-0.0.1-SNAPSHOT.jar" ]; then
+  echo -e "${RED}==== JAR não encontrado. Por favor, compile manualmente com o comando:${NC}"
+  echo -e "./mvnw clean package -DskipTests"
+  exit 1
+else
+  echo -e "${GREEN}==== JAR encontrado. Pulando compilação ====${NC}"
 fi
 
-# Solicitar o token do Vault ao usuário
-read -p "Informe o token do Vault: " VAULT_TOKEN
-ENCODED_TOKEN=$(echo -n "$VAULT_TOKEN" | base64)
+echo -e "${YELLOW}==== Configurando ambiente Docker do Minikube ====${NC}"
+eval $(minikube docker-env)
 
-# Criar arquivo Secret temporário
-echo "Criando Secret do token do Vault..."
-sed "s/REPLACE_WITH_BASE64_ENCODED_TOKEN/$ENCODED_TOKEN/g" k8s/secret-template.yaml > k8s/secret.yaml
-kubectl apply -f k8s/secret.yaml
-rm k8s/secret.yaml  # Remover arquivo temporário
+echo -e "${YELLOW}==== Construindo imagem Docker ====${NC}"
+docker build -t vault-rotation-app:v6 .
 
-# Aplicar ConfigMap
-echo "Aplicando ConfigMap..."
-kubectl apply -f k8s/configmap.yaml
+echo -e "${YELLOW}==== Verificando imagem criada ====${NC}"
+docker images | grep vault-rotation-app
 
-# Aplicar Service
-echo "Aplicando Service..."
-kubectl apply -f k8s/service.yaml
+echo -e "${YELLOW}==== Iniciando implantação com Terraform ====${NC}"
+cd terraform
 
-# Aplicar Deployment
-echo "Aplicando Deployment..."
-kubectl apply -f k8s/deployment.yaml
+echo -e "${YELLOW}==== Inicializando Terraform ====${NC}"
+terraform init
 
-echo "Aguardando o pod estar pronto..."
-kubectl wait --namespace vault-rotation-demo \
-  --for=condition=ready pod \
-  --selector=app=vault-rotation-app \
-  --timeout=120s
+echo -e "${YELLOW}==== Criando plano de execução ====${NC}"
+terraform plan -out=tfplan
 
-echo "Implantação concluída com sucesso!"
-echo "Para acessar a aplicação, execute: minikube service vault-rotation-app -n vault-rotation-demo"
+echo -e "${YELLOW}==== Aplicando configuração ====${NC}"
+terraform apply tfplan
 
-# Mostrar informações do pod
-kubectl get pods -n vault-rotation-demo
+echo -e "${GREEN}==== Implantação concluída com sucesso! ====${NC}"
+echo -e "${YELLOW}Para verificar os pods:${NC} kubectl get pods -n vault-rotation-demo"
+echo -e "${YELLOW}Para acessar os logs:${NC} kubectl logs -n vault-rotation-demo \$(kubectl get pods -n vault-rotation-demo -o jsonpath='{.items[0].metadata.name}')"
 
-# Carregar a imagem no Minikube
-minikube image load vaultrotation:0.0.1-SNAPSHOT 
+cd .. 

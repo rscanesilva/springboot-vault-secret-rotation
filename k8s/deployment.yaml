@@ -14,18 +14,28 @@ spec:
     metadata:
       labels:
         app: vault-rotation-app
+      annotations:
+        timestamp: "${TIMESTAMP}"
     spec:
       containers:
       - name: vault-rotation-app
-        image: vault-rotation-app:v3
+        image: vault-rotation-app:snapshot
         imagePullPolicy: Never
         ports:
         - containerPort: 8080
         env:
         - name: VAULT_ADDR
-          value: "http://vault.vault.svc.cluster.local:8200"
+          value: "http://vault:8200"
         - name: VAULT_TOKEN
           value: "root"
+        - name: MYSQL_ADMIN_HOST
+          value: "host.minikube.internal"
+        - name: MYSQL_ADMIN_PORT
+          value: "3306"
+        - name: MYSQL_ADMIN_USERNAME
+          value: "root"
+        - name: MYSQL_ADMIN_PASSWORD
+          value: "rootpassword"
         - name: DATABASE_URL
           value: "host.minikube.internal:3306/payments"
         - name: SPRING_DATASOURCE_URL

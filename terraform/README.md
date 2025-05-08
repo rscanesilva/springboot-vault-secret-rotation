@@ -1,100 +1,58 @@
-# Terraform para Projeto Spring Boot com Vault e MySQL
+# Implantação com Terraform
 
-Este projeto Terraform automatiza a configuração do Vault, criação do MySQL em Docker e implantação da aplicação Spring Boot no Minikube para implementar a rotação de segredos.
+Este diretório contém a configuração do Terraform para implantar a aplicação `vault-rotation-app` no Kubernetes, junto com a configuração do Vault.
 
 ## Pré-requisitos
 
-- Terraform v1.0.0+
-- Docker
-- Minikube em execução
-- kubectl configurado para o Minikube
-- Vault acessível (pode estar rodando no Minikube ou externamente)
+- Terraform v1.0+
+- Um cluster Kubernetes em execução (Minikube)
+- MySQL instalado e configurado
+- Vault em execução no namespace `vault`
 
-## Estrutura do Projeto
+## Arquivos
 
-- `main.tf` - Arquivo principal do Terraform que orquestra todos os módulos
-- `variables.tf` - Declaração de todas as variáveis do projeto
-- `outputs.tf` - Saídas do Terraform após a execução
-- `modules/` - Diretório contendo os módulos específicos:
-  - `mysql/` - Configuração do MySQL no Docker
-  - `vault/` - Configuração do Vault para rotação de segredos
-  - `kubernetes/` - Implantação da aplicação no Kubernetes
+- `main.tf` - Configuração principal do Kubernetes (namespace, deployment, service)
+- `vault.tf` - Configuração do Vault (secret engines, roles, policies)
+- `variables.tf` - Definição de variáveis para a configuração
 
-## Como Usar
+## Como usar
 
-1. Certifique-se de que o Minikube está em execução:
-   ```
-   minikube status
+1. Certifique-se de que a aplicação Spring Boot foi compilada e a imagem Docker foi criada:
+   ```bash
+   mvn clean package -DskipTests && eval $(minikube docker-env) && docker build -t vault-rotation-app:v6 .
    ```
 
-2. Certifique-se de que o Vault está em execução e acessível (por exemplo, no namespace `vault`):
-   ```
-   kubectl port-forward -n vault svc/vault 8200:8200
-   ```
-
-3. Construa a imagem da aplicação (a partir do diretório raiz do projeto):
-   ```
-   ./mvnw clean package -DskipTests
-   docker build -t vaultrotation:0.0.1-SNAPSHOT .
-   ```
-
-4. Carregue a imagem no Minikube:
-   ```
-   minikube image load vaultrotation:0.0.1-SNAPSHOT
-   ```
-
-5. Inicialize o Terraform:
-   ```
+2. Inicialize o Terraform:
+   ```bash
    cd terraform
    terraform init
    ```
 
-6. Crie um arquivo `terraform.tfvars` com suas configurações específicas (opcional):
-   ```
-   vault_addr = "http://localhost:8200"
-   vault_token = "root"
-   ```
-
-7. Execute o plano do Terraform:
-   ```
+3. Verifique o plano de execução:
+   ```bash
    terraform plan
    ```
 
-8. Aplique a configuração:
-   ```
+4. Aplique a configuração:
+   ```bash
    terraform apply
    ```
 
-9. Acesse a aplicação:
-   ```
-   minikube service vault-rotation-app -n vault-rotation-demo
+5. Para destruir a infraestrutura quando não for mais necessária:
+   ```bash
+   terraform destroy
    ```
 
 ## Variáveis
 
-| Nome | Descrição | Padrão |
-|------|-----------|--------|
-| `vault_addr` | Endereço do Vault | `http://localhost:8200` |
-| `vault_token` | Token do Vault | `root` |
-| `mysql_root_password` | Senha do MySQL | `rootpassword` |
-| `database_name` | Nome do banco de dados | `payments` |
-| `app_namespace` | Namespace para a aplicação | `vault-rotation-demo` |
-| `app_name` | Nome da aplicação | `vault-rotation-app` |
-| `app_image` | Imagem Docker da aplicação | `vaultrotation:0.0.1-SNAPSHOT` |
-| `app_replicas` | Número de réplicas | `1` |
+Você pode personalizar a implantação modificando as variáveis em `variables.tf` ou fornecendo valores na linha de comando:
 
-## Personalização
-
-Você pode personalizar a configuração editando o arquivo `terraform.tfvars` ou fornecendo variáveis na linha de comando:
-
-```
-terraform apply -var="vault_token=seu-token" -var="mysql_root_password=sua-senha"
+```bash
+terraform apply -var="image_tag=v7" -var="mysql_root_password=novasenha"
 ```
 
-## Limpeza
+## Notas importantes
 
-Para remover todos os recursos criados:
-
-```
-terraform destroy
-``` 
+- A autenticação no Vault é feita usando um token fixo para simplificar. Em ambientes de produção, use métodos de autenticação mais seguros.
+- O Terraform tentará ler os arquivos do ServiceAccount do Kubernetes para a autenticação com o Vault. Para ambientes locais, pode ser necessário modificar esta configuração.
+- A configuração atual mantém apenas um usuário do Vault no MySQL por vez, removendo os usuários antigos quando novas credenciais são obtidas. 
